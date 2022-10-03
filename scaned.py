@@ -1,6 +1,7 @@
 import cv2  # required install
 import string
 import random
+import os
 import time
 import progressbar  # required install
 import pytesseract  # required install
@@ -10,7 +11,26 @@ from PIL import ImageFont, ImageDraw, Image  # required install
 import numpy as np
 from pdf2image import convert_from_path  # required installv
 from fpdf import FPDF  # required install
+from langdetect import detect_langs
 
+def detect_add_text(str = '') :
+    try:
+        detect_langs(ele['text'])
+        textl = translator.translate(textl, dest='vi').text
+    except:
+        textl = str
+    return str
+def list_to_text(listt = []):
+    # initialize an empty string
+    str1 = ""
+
+    # traverse in the string
+    for ele in listt:
+        print(detect_langs(ele['text']))
+        str1 = str1 + '' + ele['text']
+
+    # return string
+    return str1
 
 # Translate text
 def trans_text(textl=''):
@@ -34,7 +54,7 @@ pdf.set_auto_page_break(0)
 filePath = 'sample.pdf'
 # set font translated
 fontpath = "./font/SVN-Arial Regular.ttf"
-font = ImageFont.truetype(fontpath)
+font = ImageFont.truetype(fontpath, 13)
 
 # export pdf to image
 docs = convert_from_path(filePath)
@@ -52,32 +72,59 @@ bar.start()
 for k in range(1, image_counter):
     img = cv2.imread("./output_tmp_extract/Page_no_" + str(k) + " .jpg")
 
-    d = pytesseract.image_to_data(img, output_type=Output.DICT)
-    # print(d.keys())
+    d = pytesseract.image_to_data(img, output_type=Output.DICT, lang='jpn+eng', config='--tessdata-dir ./tessdata')
+    # print(d)
 
     n_boxes = len(d['text'])
     # font = cv2.FONT_HERSHEY_SIMPLEX
     translator = Translator()
 
     # result = translator.translate('http://mrsinvoice.com', dest='vi')
-    test = []
-
+    text_group = []
+    texts_block = {}
+    j = 0
     for i in range(n_boxes):
+        data_i = {'conf': d['conf'][i], 'level': d['level'][i], 'text': d['text'][i], 'left': d['left'][i], 'top': d['top'][i], 'width': d['width'][i], 'height': d['height'][i]}
         if int(d['conf'][i]) > 60:
-            # get cor and width of text and draw rectangle
-            (x, y, w, h) = (d['left'][i], d['top'][i], d['width'][i], d['height'][i])
-            img = cv2.rectangle(img, (x, y), (x + w, y + h), (0, 255, 0), 1)
-            img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+            if i < n_boxes - 1 and int(d['level'][i]) == int(d['level'][i + 1]):
+                text_group.append(data_i)
+            elif i < n_boxes - 1 and int(d['level'][i]) != int(d['level'][i + 1]):
+                text_group.append(data_i)
+                texts_block[j] = text_group
+                j += 1
+                text_group = []
+            elif i == n_boxes - 1 and int(d['level'][i]) == int(d['level'][i - 1]):
+                text_group.append(data_i)
+                texts_block[j] = text_group
+            elif i == n_boxes - 1 and int(d['level'][i]) != int(d['level'][i - 1]):
+                text_group.append(data_i)
+                texts_block[j] = text_group
 
-            im_pil = Image.fromarray(img)
-            draw = ImageDraw.Draw(im_pil)
-            # Translate text to vietnamese
-            textTrans = trans_text(d['text'][i])
-            # img = cv2.putText(img, textTrans, (x, y + h), font, 0.5, (0, 0, 252), 1, cv2.LINE_AA)
-            draw.text((x, y + h), textTrans, font=font, fill=(255, 0, 0, 255))
-            img = np.array(im_pil)
-            # update progress bar
-            bar.update(k + (i / n_boxes))
+    len_t_block = len(texts_block)
+
+    for m in range(len_t_block):
+        # get cor and width of text and draw rectangle
+        x = texts_block[m][0]['left']
+        y = texts_block[m][0]['top']
+        w = texts_block[m][len(texts_block[m]) - 1]['left'] + texts_block[m][len(texts_block[m]) - 1]['width']
+        h = texts_block[m][len(texts_block[m]) - 1]['top'] + texts_block[m][len(texts_block[m]) - 1]['height']
+        # (x, y, w, h) = (texts_block[m][0]['left'], texts_block[m][0]['top'], texts_block[m][len(texts_block[m]) - 1]['width'], texts_block[m][len(texts_block[m]) - 1]['height'])
+        img = cv2.rectangle(img, (x, y), (x + w, y + h), (0, 255, 0), 1)
+        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+
+        # tap tick on pdf
+        im_pil = Image.fromarray(img)
+        draw = ImageDraw.Draw(im_pil)
+        # Translate text to vietnamese
+        text_from_list = list_to_text(texts_block[m])
+        textTrans = trans_text(text_from_list)
+        print(textTrans)
+
+        # img = cv2.putText(img, textTrans, (x, y + h), font, 0.5, (0, 0, 252), 1, cv2.LINE_AA)
+        draw.text((x, y), textTrans, font=font, fill=(255, 0, 0, 255))
+        img = np.array(im_pil)
+        # update progress bar
+        bar.update(k + (m / n_boxes))
     # add image to pdf
     cv2.imwrite(f'./output_tmp_extract/output_{k}.jpg', img)
 
